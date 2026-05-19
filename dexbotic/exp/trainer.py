@@ -26,10 +26,14 @@ class DexboticTrainer(Trainer):
             kwargs["processing_class"] = kwargs.pop("tokenizer")
         super().__init__(*args, args=training_args, **kwargs)
         self.loss_cache = {}
+        print(f'[TrainConfig] total_steps={training_args.max_steps} save_strategy={training_args.save_strategy} save_steps={training_args.save_steps} output_dir={training_args.output_dir}', flush=True)
+        print(f'[TrainConfig] batch={training_args.per_device_train_batch_size} grad_accum={training_args.gradient_accumulation_steps} grad_ckpt={training_args.gradient_checkpointing} bf16={training_args.bf16}', flush=True)
         if self.is_deepspeed_enabled:
-            print(f'[DexboticTrainer] DeepSpeed IS enabled, stage={self.accelerator.state.deepspeed_plugin.deepspeed_config.get("zero_optimization",{}).get("stage","?")}', flush=True)
+            ds_cfg = self.accelerator.state.deepspeed_plugin.deepspeed_config
+            stage = ds_cfg.get("zero_optimization", {}).get("stage", "?")
+            print(f'[TrainConfig] DeepSpeed=stage{stage}', flush=True)
         else:
-            print(f'[DexboticTrainer] DeepSpeed NOT enabled', flush=True)
+            print(f'[TrainConfig] DeepSpeed=off', flush=True)
 
     def create_optimizer(self) -> torch.optim.Optimizer:
         opt_model: DexboticVLMModel = self.model

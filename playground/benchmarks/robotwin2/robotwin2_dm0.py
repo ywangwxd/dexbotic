@@ -75,12 +75,19 @@ class DM0TrainerConfig(_DM0TrainerConfig):
     report_to: str = field(default="wandb")
     bf16: bool = field(default=True)
     num_train_steps: int = field(default=10000)
+    save_strategy: str = field(default="steps")
     save_steps: int = field(default=1000)
     save_total_limit: int = field(default=20)
+    # ---- 轻量微调 (freeze LLM+PE) ----
+    # per_device_train_batch_size: int = field(default=4)
+    # gradient_accumulation_steps: int = field(default=8)
+    # gradient_checkpointing: bool = field(default=False)
+    # deepspeed: Optional[str] = field(default=None)
+    # ---- 全量微调 (2.9B 全部可训练，需多卡) ----
     per_device_train_batch_size: int = field(default=4)
-    gradient_accumulation_steps: int = field(default=8)
-    gradient_checkpointing: bool = field(default=False)
-    deepspeed: Optional[str] = field(default=None)
+    gradient_accumulation_steps: int = field(default=2)
+    gradient_checkpointing: bool = field(default=True)
+    deepspeed: Optional[str] = field(default="./script/deepspeed/zero3.json")
     output_dir: str = field(
         default=f"./user_checkpoints/dexbotic/robotwin2_dm0/{TASK_NAME}"
     )
@@ -154,8 +161,12 @@ class DM0DataConfig(_DM0DataConfig):
 @dataclass
 class DM0ModelConfig(_DM0ModelConfig):
     model_name_or_path: str = field(default="./checkpoints/DM0-base")
-    freeze_llm: bool = field(default=True)
-    freeze_mm_vision: bool = field(default=True)
+    # ---- 轻量微调 (只训 Action Expert) ----
+    # freeze_llm: bool = field(default=True)
+    # freeze_mm_vision: bool = field(default=True)
+    # ---- 全量微调 (训练全部 2.9B) ----
+    freeze_llm: bool = field(default=False)
+    freeze_mm_vision: bool = field(default=False)
 
     def build_model(self) -> DM0ForCausalLM:
         model = DM0ForCausalLM.from_pretrained(
