@@ -512,10 +512,10 @@ class DM0InferenceConfig(Config):
         }
         actions = self.model.inference_action(**inputs)
         outputs = {
-            k: v.detach().cpu().numpy() if isinstance(v, torch.Tensor) else v
+            k: v.detach().cpu().float().numpy() if isinstance(v, torch.Tensor) else v
             for k, v in inputs.items()
         }
-        outputs["action"] = actions.detach().cpu().numpy()
+        outputs["action"] = actions.detach().cpu().float().numpy()
         outputs = self.output_transform(outputs)
         logger.info(f"Processing time: {time.monotonic() - t0}")
         return outputs["action"][..., : self.action_dim].tolist()
