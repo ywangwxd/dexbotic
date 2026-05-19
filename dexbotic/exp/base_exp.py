@@ -347,7 +347,7 @@ class TokenizerConfig(Config):
     def build_tokenizer(self, model_name_or_path: str, **
                         kwargs) -> transformers.PreTrainedTokenizer:
         tokenizer = transformers.AutoTokenizer.from_pretrained(
-            model_name_or_path, **kwargs)
+            model_name_or_path, fix_mistral_regex=True, **kwargs)
         if tokenizer.unk_token is not None and tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.unk_token
         return tokenizer

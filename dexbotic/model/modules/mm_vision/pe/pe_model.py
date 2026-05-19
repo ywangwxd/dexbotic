@@ -112,6 +112,10 @@ class Rope2D(nn.Module):
         return freqs
 
     def forward(self, q: torch.Tensor, k: torch.Tensor, grid_hw: tuple[int, int]):
+        # Heal corrupted freqs_cache (bf16 dtype conversion can produce NaN)
+        if torch.isnan(self.freqs_cache).any():
+            self.freqs_cache = self._compute_2d_freqs().to(
+                device=q.device, dtype=self.freqs_cache.dtype)
         if grid_hw[0] != self.max_grid_height or grid_hw[1] != self.max_grid_width:
             rows = torch.arange(grid_hw[0], device=q.device).view(-1, 1)
             cols = torch.arange(grid_hw[1], device=q.device).view(1, -1)

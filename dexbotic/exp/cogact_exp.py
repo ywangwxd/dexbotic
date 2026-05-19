@@ -133,7 +133,6 @@ class InferenceConfig(BaseInferenceConfig):
         logger.info(f"Using device: {self.device}")
         model = CogACTForCausalLM.from_pretrained(self.model_name_or_path,
                                                   torch_dtype=torch.bfloat16,
-                                                  low_cpu_mem_usage=True,
                                                   trust_remote_code=True,
                                                   device_map={"": "cuda:0"}).to(self.device)
         tokenizer = AutoTokenizer.from_pretrained(self.model_name_or_path)

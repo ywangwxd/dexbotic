@@ -213,16 +213,18 @@ class DM0ForCausalLM(DexboticForCausalLM, ActionOutputForCausalLM):
         )
 
         if past_key_values is not None:
-            cache_length = (
-                len(past_key_values.key_cache)
-                if hasattr(past_key_values, "key_cache")
-                else 0
-            )
             if use_cache:
                 key_states, value_states = past_key_values.update(
                     key_states, value_states, layer_idx
                 )
-            elif cache_length > layer_idx:
+            elif hasattr(past_key_values, "layers") and layer_idx < len(past_key_values.layers):
+                # DynamicCache (transformers 5.x): keys/values per-layer list
+                layer_cache = past_key_values.layers[layer_idx]
+                if layer_cache.keys is not None and layer_cache.keys.numel() > 0:
+                    key_states = torch.cat([layer_cache.keys, key_states], dim=-2)
+                    value_states = torch.cat([layer_cache.values, value_states], dim=-2)
+            elif hasattr(past_key_values, "key_cache") and layer_idx < len(past_key_values.key_cache):
+                # Legacy cache (transformers 4.x)
                 key_states = torch.cat(
                     [past_key_values.key_cache[layer_idx], key_states], dim=-2
                 )
@@ -230,14 +232,18 @@ class DM0ForCausalLM(DexboticForCausalLM, ActionOutputForCausalLM):
                     [past_key_values.value_cache[layer_idx], value_states], dim=-2
                 )
 
-        attn_output, _ = modeling_qwen3.eager_attention_forward(
-            layers[0].self_attn,
-            query_states,
-            key_states,
-            value_states,
-            attention_mask,
-            scaling=layers[0].self_attn.scaling,
+        # Use SDPA instead of eager attention to avoid materializing the full
+        # [B, heads, S, S] attention score matrix.
+        key_states = modeling_qwen3.repeat_kv(key_states, layers[0].self_attn.num_key_value_groups)
+        value_states = modeling_qwen3.repeat_kv(value_states, layers[0].self_attn.num_key_value_groups)
+        attn_output = F.scaled_dot_product_attention(
+            query_states, key_states, value_states,
+            attn_mask=attention_mask,
+            dropout_p=0.0,
+            is_causal=False,
+            scale=layers[0].self_attn.scaling,
         )
+        attn_output = attn_output.transpose(1, 2).contiguous()
 
         attn_output = attn_output.view(batch_size, sum(seq_len_list), -1)
         layer_embeds_list = []
@@ -300,7 +306,8 @@ class DM0ForCausalLM(DexboticForCausalLM, ActionOutputForCausalLM):
     def encode_images(self, images: torch.Tensor) -> torch.Tensor:
         """Encode images using vision module.
 
-        Uses the model's embed_image method which follows dm0 architecture.
+        The PE vision tower (pe_lang_l14_728) handles 728x728 input via 4x
+        downsampling before CLIP, producing ~170 tokens per image.
         """
         return self.model.embed_image(images)
 
@@ -425,6 +432,9 @@ class DM0ForCausalLM(DexboticForCausalLM, ActionOutputForCausalLM):
         """Forward pass for training."""
         batch_size = actions.shape[0]
 
+
+
+
         # Sample noise and time
         noise = torch.normal(
             mean=torch.zeros_like(actions),
@@ -492,12 +502,13 @@ class DM0ForCausalLM(DexboticForCausalLM, ActionOutputForCausalLM):
             use_cache=False,
         )
 
+
         # Compute flow matching loss
-        if actions.dtype == torch.float32:
-            suffix_out = suffix_out.to(torch.float32)
+        suffix_out = suffix_out.to(self.model.action_out_proj.weight.dtype)
         suffix_out_final = suffix_out[:, -self.model.config.chunk_size :]
         v_t = self.model.action_out_proj(suffix_out_final)
         action_loss = F.mse_loss(v_t, u_t, reduction="mean")
+
 
         loss = action_loss
 
@@ -543,6 +554,9 @@ class DM0ForCausalLM(DexboticForCausalLM, ActionOutputForCausalLM):
                 input_ids, attention_mask, images, image_masks
             )
         )
+
+        if self.model.config.bf16:
+            prefix_hidden_states = prefix_hidden_states.to(dtype=torch.bfloat16)
 
         # Build attention mask
         prefix_attn_mask_2d = make_attn_mask_2d(
@@ -612,6 +626,10 @@ class DM0ForCausalLM(DexboticForCausalLM, ActionOutputForCausalLM):
         suffix_hidden_states, suffix_padding_mask, suffix_attn_mask = (
             self.get_suffix_hidden_states(x_t, time.broadcast_to(batch_size))
         )
+
+        # Match training path: cast to bf16 if model uses bf16
+        if self.model.config.bf16:
+            suffix_hidden_states = suffix_hidden_states.to(dtype=torch.bfloat16)
 
         # Build suffix attention mask
         suffix_attn_mask_2d = make_suffix_attn_mask_2d(

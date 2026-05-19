@@ -21,8 +21,15 @@ class DexboticTrainer(Trainer):
     def __init__(self, *args, **kwargs):
         self.exp_config: BaseExp = kwargs.pop("exp_config")
         training_args = self._link_exp_config()
+        # transformers 5.x renamed tokenizer -> processing_class
+        if "tokenizer" in kwargs:
+            kwargs["processing_class"] = kwargs.pop("tokenizer")
         super().__init__(*args, args=training_args, **kwargs)
         self.loss_cache = {}
+        if self.is_deepspeed_enabled:
+            print(f'[DexboticTrainer] DeepSpeed IS enabled, stage={self.accelerator.state.deepspeed_plugin.deepspeed_config.get("zero_optimization",{}).get("stage","?")}', flush=True)
+        else:
+            print(f'[DexboticTrainer] DeepSpeed NOT enabled', flush=True)
 
     def create_optimizer(self) -> torch.optim.Optimizer:
         opt_model: DexboticVLMModel = self.model
@@ -147,6 +154,7 @@ class DexboticTrainer(Trainer):
             "tf32": self.exp_config.trainer_config.tf32,
             "lr_scheduler_type": self.exp_config.trainer_config.lr_scheduler_type,
             "lr_scheduler_kwargs": self.exp_config.trainer_config.lr_scheduler_kwargs,
+            "report_to": getattr(self.exp_config.trainer_config, "report_to", "all"),
             "run_name": self.exp_config.trainer_config.run_name,
             "remove_unused_columns": False,
             "deepspeed": self.exp_config.trainer_config.deepspeed,
@@ -169,6 +177,13 @@ class DexboticTrainer(Trainer):
 
     def compute_loss(self, model, inputs, return_outputs=False, *args, **kwargs):
         loss, outputs = super().compute_loss(model, inputs, return_outputs=True)
+
+        # HF Trainer skips loss/grad_accum normalization when the model
+        # forward accepts **kwargs (model_accepts_loss_kwargs=True).
+        # Apply it here so both logging and gradient scale are correct.
+        if self.args.gradient_accumulation_steps > 1:
+            loss = loss / self.args.gradient_accumulation_steps
+
         loss_keys = [_ for _ in outputs if _.endswith("_loss")]
 
         for loss_key in loss_keys:

@@ -16,7 +16,7 @@ from dexbotic.model.modules.mm_vision.builder import build_vision_tower
 
 class DexboticConfig(PretrainedConfig):
     model_type = "dexbotic"
-    llm_config: str | PretrainedConfig
+    llm_config: str | PretrainedConfig | None = None
     mm_projector_type: Optional[str] = 'mlp2x_gelu'
     mm_vision_tower: Optional[str] = None
     chat_template: Optional[str] = 'dexbotic'
